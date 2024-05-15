@@ -166,3 +166,4 @@ cython_debug/
 
 # Large datasets
 CIFAR10/
+data/
