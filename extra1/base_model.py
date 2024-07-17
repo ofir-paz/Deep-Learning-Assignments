@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 import torch.optim as optim
 from torchmetrics import Accuracy
 from torch import Tensor
-from typing import Tuple, Union
+from typing import Literal, Tuple, Union
 # ============================== End Of Imports ============================== #
 
 
@@ -36,7 +36,8 @@ class BaseModel(nn.Module):
         """Forward pass."""
         raise NotImplementedError
 
-    def fit(self, train_loader: DataLoader, val_loader: DataLoader,
+    def fit(self, train_loader: DataLoader, val_loader: DataLoader, 
+            task_type: Literal["classification", "regression"] = "classification",
             num_epochs: int = 30, lr: float = 0.001, wd: float = 0.,
             try_cuda: bool = True, verbose: bool = True, print_stride: int = 1) -> None:
         """
@@ -45,6 +46,7 @@ class BaseModel(nn.Module):
         Args:
             train_loader (DataLoader) - The dataloader to fit the model to.
             val_loader (DataLoader) - The dataloader to validate the model on.
+            task_type (Literal["classification", "regression"]) - Task type.
             num_epochs (int) - Number of epochs.
             lr (float) - Learning rate.
             wd (float) - Weight decay.
@@ -62,7 +64,8 @@ class BaseModel(nn.Module):
 
         # Create the optimizer and criterion.
         optimizer = optim.Adam(self.parameters(), lr=lr, weight_decay=wd)
-        criterion = nn.CrossEntropyLoss()
+        assert task_type in ["classification", "regression"], "Invalid task type."
+        criterion = nn.CrossEntropyLoss() if task_type == "classification" else nn.MSELoss()
 
         start_epoch = self.global_epoch
         for epoch in range(num_epochs):
@@ -122,7 +125,7 @@ class BaseModel(nn.Module):
         y_hat = self(x)
 
         loss = criterion(y_hat, y)
-        loss.backward(retain_graph=True)
+        loss.backward()
         optimizer.step()
 
         # Calc loss.
