@@ -21,11 +21,17 @@ from typing import Literal, Tuple, Union, Optional
 # ============================== End Of Imports ============================== #
 
 
+# ================================= Constants ================================ #
+POSSIBLE_JOBS = ["classification", "regression", "single-sentence-autoencoder"]
+JobType = Literal["classification", "regression", "single-sentence-autoencoder"]
+# ============================== End Of Constants ============================ #
+
+
 # ============================== BaseModel Class ============================= #
 class BaseModel(nn.Module):
     """Base model class."""
 
-    def __init__(self, task_type: Literal["classification", "regression"] = "classification") -> None:
+    def __init__(self, job_type: JobType = "classification") -> None:
         """Constructor."""
         super(BaseModel, self).__init__()
         self.best_weights: Optional[dict[str, Tensor]] = None
@@ -36,13 +42,13 @@ class BaseModel(nn.Module):
         self.train_scores: list[float] = []
         self.val_scores: list[float] = []
 
-        if task_type not in ["classification", "regression"]:
-            raise NotImplementedError("Invalid task type.")
-        self.task_type: Literal["classification", "regression"] = task_type
+        if job_type not in POSSIBLE_JOBS:
+            raise NotImplementedError("Invalid job type.")
+        self.job_type: JobType = job_type
         
-        self.criterion: BaseNNLossModule = nn.CrossEntropyLoss() \
-            if self.task_type == "classification" else nn.MSELoss()
-        self.score_name: str = "Accuracy" if self.task_type == "classification" else "MSE"        
+        self.criterion: BaseNNLossModule = nn.MSELoss() \
+            if self.job_type == "regression" else nn.CrossEntropyLoss()
+        self.score_name: str = "MSE" if self.job_type == "regression" else "Accuracy"        
 
     def forward(self, *args, **kwargs) -> Tensor:
         """Forward pass."""
@@ -83,15 +89,17 @@ class BaseModel(nn.Module):
             for mb, (x, y) in enumerate(train_loader):
                 if use_cuda:
                     x: Tensor = x.cuda(); y: Tensor = y.cuda()
+                if self.job_type == "single-sentence-autoencoder":
+                    y = y.squeeze(0)
 
                 y_hat, lloss = self.__train_step(x, y, optimizer)
 
                 running_loss += lloss * x.size(0)
 
-                if self.task_type == "classification":
+                if self.job_type in ["classification", "single-sentence-autoencoder"]:
                     train_score += (y_hat.argmax(1) == y).sum().item()
 
-                elif self.task_type == "regression":
+                elif self.job_type == "regression":
                     reshaped_y = y.reshape_as(y_hat)
                     train_score += F.mse_loss(y_hat, reshaped_y).item() * x.size(0)
 
@@ -109,7 +117,7 @@ class BaseModel(nn.Module):
             self.train_scores.append(train_total_score); self.val_scores.append(val_total_score)
 
             # We want to maximize accuracy but minimize MSE.
-            score = val_total_score if self.task_type == "classification" else -val_total_score
+            score = -val_total_score if self.job_type == "regression" else val_total_score
             self.save_best_weights(score)
 
             if verbose and (epoch % print_stride == 0 or epoch == num_epochs - 1):
@@ -136,12 +144,12 @@ class BaseModel(nn.Module):
         optimizer.zero_grad()
 
         # forward + backward + optimize.
-        y_hat = self(x)
+        y_hat: Tensor = self(x)
 
-        if self.task_type == "regression":
+        if self.job_type == "regression":
             y = y.reshape_as(y_hat)
 
-        loss = self.criterion(y_hat, y)
+        loss: Tensor = self.criterion(y_hat, y)
         loss.backward()
         optimizer.step()
 
@@ -169,13 +177,15 @@ class BaseModel(nn.Module):
             for x, y in data_loader:
                 if use_cuda:
                     x: Tensor = x.cuda(); y: Tensor = y.cuda()
-                
+                if self.job_type == "single-sentence-autoencoder":
+                    y = y.squeeze(0)
+
                 y_hat = self(x)
 
-                if self.task_type == "classification":
+                if self.job_type in ["classification", "single-sentence-autoencoder"]:
                     score += (torch.argmax(y_hat, dim=1) == y).sum().item()
 
-                elif self.task_type == "regression":
+                elif self.job_type == "regression":
                     y = y.reshape_as(y_hat)
                     score += F.mse_loss(y_hat, y).item() * x.size(0)
 
@@ -219,7 +229,7 @@ class BaseModel(nn.Module):
         with torch.no_grad():
             for x, _ in data_loader:
                 if use_cuda:
-                    x = x.cuda()
+                    x: Tensor = x.cuda()
                 y_hat = self(x)
                 outputs.append(y_hat)
         self.train()
