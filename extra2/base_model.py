@@ -16,7 +16,8 @@ from torch.utils.data import DataLoader
 import torch.optim as optim
 from torchmetrics import Accuracy
 from torch import Tensor
-from typing import Literal, Tuple, Union
+from torch.nn.modules.loss import _Loss as BaseNNLossModule
+from typing import Literal, Tuple, Union, Optional
 # ============================== End Of Imports ============================== #
 
 
@@ -27,7 +28,7 @@ class BaseModel(nn.Module):
     def __init__(self, task_type: Literal["classification", "regression"] = "classification") -> None:
         """Constructor."""
         super(BaseModel, self).__init__()
-        self.best_weights: Union[dict[str, Tensor], None] = None
+        self.best_weights: Optional[dict[str, Tensor]] = None
         self.global_epoch: int = 0
         
         self.train_costs: list[float] = []
@@ -39,11 +40,11 @@ class BaseModel(nn.Module):
             raise NotImplementedError("Invalid task type.")
         self.task_type: Literal["classification", "regression"] = task_type
         
-        self.criterion: nn.Module = nn.CrossEntropyLoss() \
+        self.criterion: BaseNNLossModule = nn.CrossEntropyLoss() \
             if self.task_type == "classification" else nn.MSELoss()
         self.score_name: str = "Accuracy" if self.task_type == "classification" else "MSE"        
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, *args, **kwargs) -> Tensor:
         """Forward pass."""
         raise NotImplementedError
 
@@ -83,7 +84,7 @@ class BaseModel(nn.Module):
                 if use_cuda:
                     x: Tensor = x.cuda(); y: Tensor = y.cuda()
 
-                y_hat, lloss = self.__train_step(x, y, optimizer, use_cuda)
+                y_hat, lloss = self.__train_step(x, y, optimizer)
 
                 running_loss += lloss * x.size(0)
 
@@ -119,8 +120,7 @@ class BaseModel(nn.Module):
                       f" Val {self.score_name}: {val_total_score:.3f}]")
         self.cpu()
 
-    def __train_step(self, x: Tensor, y: Tensor, optimizer: optim.Optimizer,
-                     use_cuda: bool) -> Tuple[Tensor, float]:
+    def __train_step(self, x: Tensor, y: Tensor, optimizer: optim.Optimizer) -> Tuple[Tensor, float]:
         """
         Performs a single training step.
 
@@ -128,8 +128,9 @@ class BaseModel(nn.Module):
             x (Tensor) - Input tensor.
             y (Tensor) - Target tensor.
             optimizer (Optimizer) - Optimizer.
-            use_cuda (bool) - Use CUDA flag.
-
+        
+        Returns:
+            Tuple[Tensor, float] - The model's output and the loss of the model.
         """
         # zero the parameter gradients.
         optimizer.zero_grad()
