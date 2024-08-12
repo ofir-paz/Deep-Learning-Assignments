@@ -92,22 +92,16 @@ class BaseModel(nn.Module):
                 if self.job_type == "single-sentence-autoencoder":
                     y = y.squeeze(0)
 
-                y_hat, lloss = self.__train_step(x, y, optimizer)
+                y_hat, loss = self.__train_step(x, y, optimizer)
 
-                running_loss += lloss * x.size(0)
-
-                if self.job_type in ["classification", "single-sentence-autoencoder"]:
-                    train_score += (y_hat.argmax(1) == y).sum().item()
-
-                elif self.job_type == "regression":
-                    reshaped_y = y.reshape_as(y_hat)
-                    train_score += F.mse_loss(y_hat, reshaped_y).item() * x.size(0)
+                running_loss, train_score = self._calc_running_matrics(
+                    x, y_hat, y, loss, running_loss, train_score)
 
                 # TODO: Use tqdm instead of print.
                 if verbose:
                     print(f"\r[epoch: {self.global_epoch:02d}/{start_epoch + num_epochs:02d} "
                           f"mb: {mb + 1:03d}/{len(train_loader):03d}]  " 
-                          f"[Train loss: {lloss:.6f}]", end="")
+                          f"[Train loss: {loss:.6f}]", end="")
 
             train_epoch_loss = running_loss / len(train_loader.dataset)  # type: ignore
             train_total_score = train_score / len(train_loader.dataset)  # type: ignore
@@ -124,7 +118,7 @@ class BaseModel(nn.Module):
                 print(f"\r[epoch: {self.global_epoch:02d}/{start_epoch + num_epochs:02d}] "
                       f"[Train loss: {train_epoch_loss:.6f} "
                       f" Train {self.score_name}: {train_total_score:.3f}]  "
-                      f"[Val loss: {val_epoch_loss:.6f}] "
+                      f"[Val loss: {val_epoch_loss:.6f} "
                       f" Val {self.score_name}: {val_total_score:.3f}]")
         self.cpu()
 
@@ -153,7 +147,6 @@ class BaseModel(nn.Module):
         loss.backward()
         optimizer.step()
 
-        # Calc loss.
         lloss = loss.item()
 
         return y_hat, lloss
@@ -171,7 +164,7 @@ class BaseModel(nn.Module):
             Tuple[float, float] - The loss and score of the model on the given dataset.            
         """
         running_loss = 0.
-        score = 0.
+        runninng_score = 0.
         self.eval()
         with torch.no_grad():
             for x, y in data_loader:
@@ -180,21 +173,33 @@ class BaseModel(nn.Module):
                 if self.job_type == "single-sentence-autoencoder":
                     y = y.squeeze(0)
 
-                y_hat = self(x)
+                y_hat: Tensor = self(x)
+                loss: float = self.criterion(y_hat, y).item()
 
-                if self.job_type in ["classification", "single-sentence-autoencoder"]:
-                    score += (torch.argmax(y_hat, dim=1) == y).sum().item()
-
-                elif self.job_type == "regression":
-                    y = y.reshape_as(y_hat)
-                    score += F.mse_loss(y_hat, y).item() * x.size(0)
-
-                running_loss += self.criterion(y_hat, y).item() * x.size(0)
+                running_loss, runninng_score = self._calc_running_matrics(
+                    x, y_hat, y, loss, running_loss, runninng_score)
 
         self.train()
         total_loss = running_loss / len(data_loader.dataset)  # type: ignore
-        total_score = score / len(data_loader.dataset)  # type: ignore
+        total_score = runninng_score / len(data_loader.dataset)  # type: ignore
         return total_loss, total_score
+
+    def _calc_running_matrics(self, x: Tensor, y_hat: Tensor, y: Tensor, loss: float,
+                              running_loss: float, running_score: float) -> Tuple[float, float]:
+        if self.job_type == "classification":
+            curr_score = (y_hat.argmax(1) == y).sum().item()
+        
+        elif self.job_type == "single-sentence-autoencoder":
+            # Take average per sentence (there is no batch dimention).
+            curr_score = (y_hat.argmax(1) == y).sum().item() / x.size(1)
+
+        elif self.job_type == "regression":
+            y = y.reshape_as(y_hat)
+            curr_score = F.mse_loss(y_hat, y).item() * x.size(0)
+
+        running_loss += loss * x.size(0)
+        running_score += curr_score
+        return running_loss, running_score
 
     def save_best_weights(self, score: float) -> None:
         """Saves the best weights of the model."""
