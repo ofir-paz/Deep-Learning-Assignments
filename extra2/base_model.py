@@ -174,6 +174,8 @@ class BaseModel(nn.Module):
                     y = y.squeeze(0)
 
                 y_hat: Tensor = self(x)
+                if self.job_type == "regression":
+                    y = y.reshape_as(y_hat)
                 loss: float = self.criterion(y_hat, y).item()
 
                 running_loss, runninng_score = self._calc_running_matrics(
